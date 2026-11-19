@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DeadlineHub — Storage Layer Automated Test Suite</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .test-container {
+      max-width: 800px;
+      margin: 2rem auto;
+      padding: 2rem;
+      background: var(--bg-card);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-color);
+      box-shadow: var(--shadow-md);
+    }
+    .test-header {
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .test-summary {
+      display: flex;
+      gap: 1.5rem;
+      margin-bottom: 1.5rem;
+      padding: 1rem;
+      background: var(--bg-card-subtle);
+      border-radius: var(--radius-md);
+    }
+    .test-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.85rem 1rem;
+      border-bottom: 1px solid var(--border-color);
+      font-size: 0.95rem;
+    }
+    .test-row:last-child {
+      border-bottom: none;
+    }
+    .test-badge {
+      font-weight: 700;
+      padding: 0.25rem 0.65rem;
+      border-radius: var(--radius-full);
+      font-size: 0.8rem;
+    }
+    .test-badge.pass {
+      background: var(--color-green-light);
+      color: var(--color-green-text);
+    }
+    .test-badge.fail {
+      background: var(--color-red-light);
+      color: var(--color-red-text);
+    }
+    .test-log {
+      margin-top: 1.5rem;
+      padding: 1rem;
+      background: #0f172a;
+      color: #38bdf8;
+      border-radius: var(--radius-md);
+      font-family: monospace;
+      font-size: 0.85rem;
+      max-height: 250px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="test-container">
+    <div class="test-header">
+      <h2>🧪 DeadlineHub Storage Layer Automated Tests</h2>
+      <p style="color: var(--text-secondary); margin-top: 0.25rem;">
+        Validating CRUD operations: Create, Read, Update, Toggle Complete, Delete, and LocalStorage persistence.
+      </p>
+    </div>
+
+    <div class="test-summary">
+      <div><strong>Status:</strong> <span id="overallStatus">Running tests...</span></div>
+      <div><strong>Passed:</strong> <span id="passCount" style="color: var(--color-green-text);">0</span></div>
+      <div><strong>Failed:</strong> <span id="failCount" style="color: var(--color-red-text);">0</span></div>
+    </div>
+
+    <div id="testResultsList"></div>
+
+    <pre class="test-log" id="testLog"></pre>
+
+    <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
+      <a href="index.html" class="btn btn-primary">&larr; Back to Dashboard</a>
+      <button onclick="runAllTests()" class="btn btn-secondary">Re-run Tests</button>
+    </div>
+  </div>
+
+  <script src="storage.js"></script>
+  <script>
+    const logEl = document.getElementById('testLog');
+    const resultsEl = document.getElementById('testResultsList');
+    const passCountEl = document.getElementById('passCount');
+    const failCountEl = document.getElementById('failCount');
+    const overallStatusEl = document.getElementById('overallStatus');
+
+    function log(msg) {
+      logEl.textContent += msg + '\n';
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    async function runAllTests() {
+      resultsEl.innerHTML = '';
+      logEl.textContent = '';
+      let passed = 0;
+      let failed = 0;
+
+      async function test(name, fn) {
+        log(`Running: ${name}...`);
+        try {
+          await fn();
+          passed++;
+          log(`  [PASS] ${name}`);
+          const row = document.createElement('div');
+          row.className = 'test-row';
+          row.innerHTML = `<span>✔ ${name}</span><span class="test-badge pass">PASS</span>`;
+          resultsEl.appendChild(row);
+        } catch (err) {
+          failed++;
+          log(`  [FAIL] ${name}: ${err.message}`);
+          const row = document.createElement('div');
+          row.className = 'test-row';
+          row.innerHTML = `<span>✖ ${name} — <em>${err.message}</em></span><span class="test-badge fail">FAIL</span>`;
+          resultsEl.appendChild(row);
+        }
+      }
+
+      // Preserve existing localStorage data before tests run
+      const originalBackup = localStorage.getItem(DeadlineStorage.STORAGE_KEY);
+
+      try {
+        // Test 1: Read all assignments
+        await test('Test 1: DeadlineStorage.getAll() returns array of assignments', async () => {
+          const list = await DeadlineStorage.getAll();
+          if (!Array.isArray(list)) throw new Error('Result is not an array');
+          if (list.length === 0) throw new Error('Expected at least 1 assignment');
+        });
+
+        // Test 2: Create new assignment (Add)
+        let createdId = null;
+        await test('Test 2: DeadlineStorage.create() successfully adds homework', async () => {
+          const newDoc = {
+            subject: 'Biology 101',
+            title: 'Cell Division Lab Report',
+            description: 'Write up mitosis phases with diagrams',
+            dueDate: '2026-11-25',
+            dueTime: '15:00',
+            priority: 'high',
+            estimatedMinutes: 60
+          };
+          const created = await DeadlineStorage.create(newDoc);
+          if (!created.id) throw new Error('Created item is missing ID');
+          if (created.subject !== 'Biology 101') throw new Error('Subject mismatch');
+          if (created.completed !== false) throw new Error('New item should be incomplete');
+
+          createdId = created.id;
+
+          // Verify persistence in localStorage
+          const all = await DeadlineStorage.getAll();
+          const found = all.find(item => item.id === createdId);
+          if (!found) throw new Error('Created item not found in storage');
+        });
+
+        // Test 3: Edit assignment (Update)
+        await test('Test 3: DeadlineStorage.update() updates assignment properties', async () => {
+          if (!createdId) throw new Error('No created item to update');
+          const updated = await DeadlineStorage.update(createdId, {
+            title: 'Cell Division Lab Report (Final Draft)',
+            priority: 'medium',
+            estimatedMinutes: 45
+          });
+
+          if (updated.title !== 'Cell Division Lab Report (Final Draft)') throw new Error('Title update failed');
+          if (updated.priority !== 'medium') throw new Error('Priority update failed');
+          if (updated.estimatedMinutes !== 45) throw new Error('Estimated minutes update failed');
+
+          // Verify in storage
+          const found = await DeadlineStorage.getById(createdId);
+          if (found.title !== 'Cell Division Lab Report (Final Draft)') throw new Error('Persisted title mismatch');
+        });
+
+        // Test 4: Toggle Complete (Complete)
+        await test('Test 4: DeadlineStorage.toggleComplete() toggles completed flag', async () => {
+          if (!createdId) throw new Error('No created item to toggle');
+          const toggled1 = await DeadlineStorage.toggleComplete(createdId);
+          if (toggled1.completed !== true) throw new Error('Expected completed to be true');
+
+          const toggled2 = await DeadlineStorage.toggleComplete(createdId);
+          if (toggled2.completed !== false) throw new Error('Expected completed to be false');
+        });
+
+        // Test 5: Delete assignment (Delete)
+        await test('Test 5: DeadlineStorage.delete() permanently removes homework', async () => {
+          if (!createdId) throw new Error('No created item to delete');
+          await DeadlineStorage.delete(createdId);
+
+          const found = await DeadlineStorage.getById(createdId);
+          if (found !== null) throw new Error('Item was not deleted');
+
+          const all = await DeadlineStorage.getAll();
+          if (all.some(item => item.id === createdId)) throw new Error('Item still found in list');
+        });
+
+        // Test 6: Verify exportJson() produces valid JSON string
+        await test('Test 6: DeadlineStorage.exportJson() produces valid JSON', async () => {
+          const jsonStr = DeadlineStorage.exportJson();
+          const parsed = JSON.parse(jsonStr);
+          if (!Array.isArray(parsed)) throw new Error('Exported JSON is not an array');
+        });
+
+      } finally {
+        // Restore original data so testing didn't mutate the user's real assignments
+        if (originalBackup !== null) {
+          localStorage.setItem(DeadlineStorage.STORAGE_KEY, originalBackup);
+        }
+      }
+
+      passCountEl.textContent = passed;
+      failCountEl.textContent = failed;
+      overallStatusEl.textContent = failed === 0 ? 'All Tests Passed! ✅' : 'Some Tests Failed ❌';
+      overallStatusEl.style.color = failed === 0 ? 'var(--color-green-text)' : 'var(--color-red-text)';
+      log(`\nTest suite complete: ${passed} passed, ${failed} failed.`);
+    }
+
+    document.addEventListener('DOMContentLoaded', runAllTests);
+  </script>
+</body>
+</html>
